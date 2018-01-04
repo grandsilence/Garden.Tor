@@ -27,8 +27,7 @@ namespace Garden.Tor.Net
         /// </summary>
         /// <param name="port">Telnet port number</param>
         /// <param name="hostName">Host name</param>
-        /// <returns>Returns true if connection established.</returns>
-        public bool Connect(int port, string hostName = "127.0.0.1")
+        public void Connect(int port, string hostName = "127.0.0.1")
         {
             _socket.Connect(hostName, port);
             if (_socket.Connected)
@@ -41,8 +40,6 @@ namespace Garden.Tor.Net
                 HostName = null;
                 Port = 0;
             }
-
-            return _socket.Connected;
         }
 
         /// <summary>
@@ -54,6 +51,7 @@ namespace Garden.Tor.Net
             if (!_socket.Connected)
                 return;
 
+            // Escape command
             byte[] buf = Encoding.ASCII.GetBytes(cmd.Replace("\0xFF", "\0xFF\0xFF"));
             _socketStream.Write(buf, 0, buf.Length);
         }

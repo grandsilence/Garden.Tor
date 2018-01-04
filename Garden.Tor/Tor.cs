@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Garden.Tor
 {
-    public class TorProxy
+    public class Tor
     {
     }
 }

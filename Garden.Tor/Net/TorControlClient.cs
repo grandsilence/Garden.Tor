@@ -1,14 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Garden.Tor.Net
+﻿namespace Garden.Tor.Net
 {
-    internal class TorRemoteClient : TelnetClient
+    internal class TorControlClient : TelnetClient
     {
-        protected TorRemoteClient()
+        protected TorControlClient()
         {
             // Soft exit for Tor
             BeforeClose += (sender, args) => WriteLine("QUIT");

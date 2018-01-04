@@ -1,98 +1,102 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Garden.Tor.IO;
 
 namespace Garden.Tor
 {
+    // TODO: copy cache instead of new (faster) 
+    public delegate void DTorLog(string text);
+
     internal abstract class BaseTor
     {
-         //TODO: copy cache instead of new (faster)  
+        #region Public
+        /// <summary>
+        /// Password used in config.cfg
+        /// </summary>
+        public string RemotePassword = "Garden.Tor";
 
-        //
-        // Public
-        public string RemotePassword = "howwedo5";
-
-        public ushort PortProxy
-        {
+        /// <summary>
+        /// SOCKS 4a Tor proxy port.
+        /// </summary>
+        public ushort PortProxy {
             get => _portProxy == 0 ? _portProxyOverride : _portProxy;
             set => _portProxyOverride = value;
         }
 
-        public ushort PortControl
-        {
+        /// <summary>
+        /// Remote Tor control port.
+        /// </summary>
+        public ushort PortControl {
             get => _portControl == 0 ? _portControlOverride : _portControl;
             set => _portControlOverride = value;
         }
 
-        public string ProxyAddress => _proxyAddress;
+        /// <summary>
+        /// Binding interface address used for remote control and proxy address.
+        /// </summary>
+        public static readonly string InterfaceAddress = "127.0.0.1";
 
+        /// <summary>
+        /// Full Socks 4a Tor proxy address including port.
+        /// </summary>
+        public string ProxyAddress { get; private set; }
+
+        /// <summary>
+        /// Serial number of tor instance.
+        /// </summary>
         public ushort Slot {
-            get { return _slot == 0 ? _slotOverride : _slot; }
-            set { _slotOverride = value; }
-        }
-        
-        public byte Progress {
-            get { return _progress; }
-            private set { _progress = value; }
+            get => _slot == 0 ? _slotOverride : _slot;
+            set => _slotOverride = value;
         }
 
+        /// <summary>
+        /// Tor connection progress.
+        /// </summary>
+        public byte Progress { get; private set; }
+
+        /// <summary>
+        /// Tor Event on progress connection event.
+        /// </summary>
         public event EventHandler<byte> OnProgress;
+        #endregion
 
-        //
-        // Protected
-        protected const string _interfaceAddress = "127.0.0.1";
-
-        //
-        // Private
-
+        #region Multithreaded Tor instances sync
         // Блокировщик потока когда надо получить слот или порты
-        static object _lockerSlot = new object();
-        static object _lockerPort = new object();
-        static object _killLocker = new object();
-        //static object _cacheLocker = new object();
+        private static readonly object LockerSlot = new object();
+        //private static readonly object LockerPort = new object();
+        private static readonly object LockerKill = new object();
+        #endregion
 
         // При первом запуске, первого экземпляра тора очищаем все старые tor.exe
-        static bool _killOldTors = true;
-
-        FileStream _lock = null;
+        private static bool _killOldTors = true;
+        private FileStream _lock;
     
-        // Порты
-        // которые непосредственно используются тором
-        ushort _portProxy = 0, _portControl = 0;
-        // которые заданны пользователем, через поля, чтобы переопеделять автовыбор порта т.е. порты указаны вручную
-        ushort _portProxyOverride = 0, _portControlOverride = 0;
-        // Полный адрес прокси, "адрес_интерфейса:порт"
-        string _proxyAddress = null;
+        // Порты которые непосредственно используются тором
+        private ushort _portProxy, _portControl,
+            // которые заданны пользователем, через поля, чтобы переопеделять автовыбор порта т.е. порты указаны вручную
+            _portProxyOverride, _portControlOverride;
 
         // Слот
-        ushort _slot = 0;
-        ushort _slotOverride = 0;
-        static ushort _slotCached = 0;
+        private ushort _slot, _slotOverride;
 
-        // Прогресс 
-        byte _progress = 0;
-
-        DLog _log;
+        private readonly DTorLog _log;
         
         // Переменные связанные с процессом Tor.exe 
-        Process _process;
-        bool _running = false;        
-        string _torExeLinkPath;
+        private Process _process;
+        private bool _running = false;        
+        private string _torExeLinkPath;
 
         // Обработчики при закрытии программы консоли, храним потому что сборщик очищает
-        HandlerRoutine _consoleExitHandler;
+        private ConsoleHandlerRoutine _consoleExitConsoleHandler;
 
         /// <summary>
         /// Подготовка экземпляра Tor для дальнейшего запуска через метод Start().
         /// </summary>
         /// <param name="log">Метод для вывода лога, null если отключить вывод.</param>
-        public TorBase(DLog log = null) {
+        protected BaseTor(DTorLog log = null) {
             _log = log;
         }
 
@@ -117,7 +121,7 @@ namespace Garden.Tor
 
         ushort GetAvailableSlot() {
             ushort slot;
-            lock (_lockerSlot) {
+            lock (LockerSlot) {
                 for (slot = 1; !CreateSlotLocker(slot) || !ResourceHelper.TryDelete($"tor_files\\cache\\{slot}\\lock"); slot++);
             }
 
@@ -196,7 +200,7 @@ namespace Garden.Tor
             _torExeLinkPath = torFolderPath + torExeLink  + ".exe";
 
             // Убиваем все старые торы перед запуском и после завершения работы проги
-            lock (_killLocker) {
+            lock (LockerKill) {
                 if (_killOldTors) {
                     _killOldTors = false;
 
@@ -204,11 +208,11 @@ namespace Garden.Tor
 
                     if (ResourceHelper.IsConsoleApplication) {
                         // Используем переменные для Handler'ов потому что сборщик иначе удаляет
-                        _consoleExitHandler = new HandlerRoutine((ControlTypes ctrlType) => {
+                        _consoleExitConsoleHandler = new ConsoleHelper.HandlerRoutine((ControlTypes ctrlType) => {
                             OnTerminate();
                             return true;
                         });
-                        SetConsoleCtrlHandler(_consoleExitHandler, true);
+                        SetConsoleCtrlHandler(_consoleExitConsoleHandler, true);
                     }
 
                     // Forms Exit
@@ -302,7 +306,7 @@ namespace Garden.Tor
                 return (Progress == 100);
             });
 
-            _proxyAddress = _interfaceAddress + ":" + _portProxy;
+            _proxyAddress = InterfaceAddress + ":" + _portProxy;
 
             // Подключаемся и настраиваемся на сервер Telnet
             RemoteInit();
@@ -330,7 +334,7 @@ namespace Garden.Tor
             // Ждем подключения по Telnet
             Log("Подключаемся по Telnet к управляющему серверу Tor...");
             WaitFor(() => {
-                _tcpSocket.Connect(_interfaceAddress, _portControl);
+                _tcpSocket.Connect(InterfaceAddress, _portControl);
                 return _tcpSocket.Connected;
             }, "Невозможно подключиться по Telnet к Tor в течение 10 секунд.", 500, 20);
 
@@ -396,44 +400,28 @@ namespace Garden.Tor
         }
 
        
+        #region IDisposable Support Pattern
+        private bool _disposed;
 
-        #region Disposing
-        bool _disposed = false;
-
-        // Public implementation of Dispose pattern callable by consumers.
-        public void Dispose() {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        // Protected implementation of Dispose pattern.
-        protected virtual void Dispose(bool disposing) {
-            if (_disposed)
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) 
                 return;
 
-            if (disposing) {
-                // Disconnect from remote Telnet Tor Control
-                Disconnect();
-                // Stop tor process and wait for exit
-                Stop(force: false, waitForExit: true);
-                // Delete hard link
-                ResourceHelper.TryDelete(_torExeLinkPath);
+            // Release managed objects
+            if (disposing)
+            {
+                // disp remote client
             }
 
-            // Free any unmanaged objects here.
-            //
+            // Set big fields to NULL here:
             _disposed = true;
         }
-
-        void Disconnect() {
-            if (_tcpSocket.Connected) {
-                RemoteWriteLine("QUIT");
-
-                // Dispose Tcp Socket
-                _tcpSocket.Close();               
-            }
+        
+        public void Dispose()
+        {
+            Dispose(true);
         }
         #endregion
-    }
     }
 }
