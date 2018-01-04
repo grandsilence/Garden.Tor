@@ -14,6 +14,9 @@ namespace Garden.Tor.Net
         public string HostName { get; private set; }
         public int Port { get; private set; }
 
+        // Events
+        public event EventHandler BeforeClose;
+
         protected TelnetClient()
         {
             _socketStream = _socket.GetStream();
@@ -76,6 +79,7 @@ namespace Garden.Tor.Net
             var sb = new StringBuilder();
             do {
                 Parse(sb);
+                // TODO: bypass sleep
                 Thread.Sleep(100); // Delay is required
             } while (_socket.Available > 0);
 
@@ -154,25 +158,27 @@ namespace Garden.Tor.Net
         #endregion
 
         #region IDisposable Support Pattern
-        protected bool Disposed;
+        private bool _disposed;
 
         protected virtual void Dispose(bool disposing)
         {
-            if (Disposed) 
+            if (_disposed) 
                 return;
 
             // Release managed objects
             if (disposing)
+            {
+                BeforeClose?.Invoke(null, null);
                 _socket?.Dispose();
-            
+            }
+
             // Set big fields to NULL here:
-            Disposed = true;
+            _disposed = true;
         }
         
         public void Dispose()
         {
             Dispose(true);
-            // GC.SuppressFinalize(this);
         }
         #endregion
     }

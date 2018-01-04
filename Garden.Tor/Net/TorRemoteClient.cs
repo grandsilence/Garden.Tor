@@ -8,6 +8,12 @@ namespace Garden.Tor.Net
 {
     internal class TorRemoteClient : TelnetClient
     {
+        protected TorRemoteClient()
+        {
+            // Soft exit for Tor
+            BeforeClose += (sender, args) => WriteLine("QUIT");
+        }
+
         /// <summary>
         /// Authenticate on the Tor remote server.
         /// </summary>
@@ -17,26 +23,18 @@ namespace Garden.Tor.Net
         {
             string escapedPassword = password.Replace("\"", "\\\"");
             WriteLine($"AUTHENTICATE \"{escapedPassword}\"");
-            return ResponseContains("250");
-        }
+            if (!ResponseContains("250"))
+                return false;
 
-        public void ListenEvents() => WriteLine("SETEVENTS SIGNAL");
-        
-        public void ExitOnDisconnect() => WriteLine("TAKEOWNERSHIP");
+            WriteLine("SETEVENTS SIGNAL"); // Listen Events
+            WriteLine("TAKEOWNERSHIP"); // Exit On Disconnect
+            return true;
+        }
 
         public bool CircuitEstablished()
         {
             WriteLine("getinfo status/circuit-established");
             return ResponseContains("established=1");
-        }
-        
-        protected override void Dispose(bool disposing)
-        {
-            if (Disposed || !disposing) 
-                return;
-
-            WriteLine("QUIT");
-            base.Dispose(true);
         }
     }
 }
